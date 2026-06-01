@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: breaking-news-ai-backend
+    runtime: node
+    repo: https://github.com/yourusername/breaking-news-ai
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+    free: true

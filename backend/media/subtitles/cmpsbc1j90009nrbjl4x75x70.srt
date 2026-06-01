@@ -1,0 +1,40 @@
+1
+00:00:00,000 --> 00:00:03,000
+**[HOOK]**
+*"Eight years in power.
+
+2
+00:00:03,000 --> 00:00:06,000
+A wave of scandals.
+
+3
+00:00:06,000 --> 00:00:09,000
+And now, Spain’s Prime Minister Pedro Sánchez faces his toughest test yet—can he survive the storm?
+
+4
+00:00:09,000 --> 00:00:12,000
+The latest political earthquake is shaking Madrid."*
+
+**[NEWS]**
+Spain’s ruling Socialist Party is under fire after a string of corruption allegations—from party funding leaks to a controversial housing deal tied to Sánchez’s inner circle.
+
+5
+00:00:12,000 --> 00:00:15,000
+Polls show his approval ratings plummeting, while opposition parties demand his resignation.
+
+6
+00:00:15,000 --> 00:00:18,000
+With a snap election looming, Sánchez digs in, but can he hold together a coalition that’s unraveling?
+
+7
+00:00:18,000 --> 00:00:21,000
+**[WRAP]**
+*"As Spain’s political crisis deepens, will Sánchez weather the storm—or will this be the end of his eight-year reign?
+
+8
+00:00:21,000 --> 00:00:24,000
+Stay tuned for updates as this story develops.
+
+9
+00:00:24,000 --> 00:00:27,000
+#SpainPolitics"*
