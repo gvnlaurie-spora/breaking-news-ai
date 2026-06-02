@@ -8,7 +8,7 @@
     "process-articles": "tsx src/scripts/processArticles.ts",
     "generate-videos": "NODE_OPTIONS=--dns-result-order=ipv4first tsx src/scripts/generate-videos.ts",
     "upload-videos": "tsx src/scripts/uploadVideos.ts",
-    "build": "tsc",
+    "build": "tsc --skipLibCheck",
     "start": "node dist/server.js",
     "prisma:push": "prisma db push",
     "prisma:generate": "prisma generate",
