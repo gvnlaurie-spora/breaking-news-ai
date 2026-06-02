@@ -1,13 +1,23 @@
 services:
   - type: web
-    name: breaking-news-ai-backend
+    name: breaking-news-backend
     runtime: node
-    repo: https://github.com/yourusername/breaking-news-ai
+    repo: https://github.com/gvnlaurie-spora/breaking-news-ai
+    plan: free
+    branch: main
+    rootDir: backend
     buildCommand: npm install && npm run build
-    startCommand: npm run start
+    startCommand: npm start
     envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 4000
-    free: true
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: AZURE_SPEECH_KEY
+        sync: false
+      - key: AZURE_SPEECH_ENDPOINT
+        sync: false
