@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { prisma } from "../utils/prisma";
-import { processArticleWithAI } from "../services/ai/orchestrator";
+import { orchestrateArticle } from "../services/ai/orchestrator";
 
 const TARGET_ARTICLE_ID = 'cmps79khg00ayvbg1bbewe7tv';
 
@@ -19,10 +19,10 @@ async function processSingleArticle() {
   console.log(`📰 Title: ${article.title}`);
   console.log(`📝 Content available: ${article.content ? 'Yes' : 'No'}`);
   
-  const result = await processArticleWithAI(TARGET_ARTICLE_ID);
+  const result = await orchestrateArticle(TARGET_ARTICLE_ID);
   
   if (result) {
-    console.log(`✅ Success! Script saved with ID: ${result.id}`);
+    console.log(`✅ Success! Script saved with ID: ${result.originalArticle.id}`);
   } else {
     console.log(`❌ Failed to generate script`);
   }

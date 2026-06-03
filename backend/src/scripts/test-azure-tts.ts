@@ -25,7 +25,7 @@ async function testAzureTTS() {
     
     // Play the audio
     const { exec } = require('child_process');
-    exec('ffplay /tmp/test-azure.mp3', (error) => {
+    exec('ffplay /tmp/test-azure.mp3', (error: Error | null) => {
       if (error) console.log("Play with: ffplay /tmp/test-azure.mp3");
     });
   } catch (error) {

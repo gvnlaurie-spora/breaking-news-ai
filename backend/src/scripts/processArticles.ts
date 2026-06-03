@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { prisma } from "../utils/prisma";
-import { processArticleWithAI } from "../services/ai/orchestrator";
+import { orchestrateArticle } from "../services/ai/orchestrator";
 
 async function processAllArticles() {
   console.log("🔄 Starting AI processing for all articles...");
@@ -26,7 +26,7 @@ async function processAllArticles() {
   // --- Process each article ---
   for (const article of articles) {
     try {
-      await processArticleWithAI(article.id);
+      await orchestrateArticle(article.id);
       console.log(`✅ Processed: ${article.title.substring(0, 50)}...`);
     } catch (error) {
       console.error(`❌ Failed to process article ${article.id}:`, error);
