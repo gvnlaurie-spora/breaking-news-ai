@@ -12,31 +12,25 @@ const server = fastify({ logger: true });
 server.register(fastifyCors);
 server.register(fastifyHelmet);
 
-// Register routes
+// Register routes with /api prefix
 server.register(healthRoute, { prefix: '/api' });
 server.register(articleRoutes, { prefix: '/api' });
 
-// Health check at both /health and /api/health for compatibility
-server.get('/health', async () => ({
-  status: 'ok',
-  timestamp: new Date().toISOString()
-}));
-
-server.get('/api/health', async () => ({
-  status: 'ok',
-  timestamp: new Date().toISOString()
-}));
-
-// Root endpoint
+// Root endpoint (no /api prefix)
 server.get('/', async () => ({
   name: 'Breaking News AI API',
   version: '1.0.0',
   status: 'running',
   endpoints: {
-    health: '/health',
-    apiHealth: '/api/health',
+    health: '/api/health',
     articles: '/api/articles'
   }
+}));
+
+// Keep a simple root health check (no /api prefix) for load balancers
+server.get('/health', async () => ({
+  status: 'ok',
+  timestamp: new Date().toISOString()
 }));
 
 // Start server
