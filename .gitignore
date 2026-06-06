@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+backend/output/
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+*.mp3
+*.mp4
+*.jpg
+*.png
