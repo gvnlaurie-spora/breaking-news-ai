@@ -1,97 +1,36 @@
-# Breaking News AI v2.0 — 30-Minute Compilation Pipeline
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-## What it does
-Scrapes 8–10 international news stories every 4 hours, generates AI voiceovers,
-fetches real stock footage + AI images, compiles ONE 30-minute video, uploads to YouTube.
+## Getting Started
 
-**Africa is excluded from all coverage.**
+First, run the development server:
 
----
-
-## Video Structure
-```
-[Intro 15s] → [Story 1: 3-4min] → [Transition 5s] → [Story 2] → ... → [Outro 15s]
-```
-
----
-
-## Setup
-
-### 1. Copy env file
 ```bash
-cp .env.example .env
-```
-Fill in:
-- `MISTRAL_API_KEY` — from console.mistral.ai
-- `AZURE_SPEECH_KEY` + `AZURE_SPEECH_ENDPOINT` — from Azure portal
-- `PEXELS_API_KEY` — free at pexels.com/api (optional but improves quality)
-- `PIXABAY_API_KEY` — free at pixabay.com/api (optional)
-- YouTube credentials (see below)
-
-### 2. Install dependencies
-```bash
-npm install
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-### 3. Set up database
-```bash
-npm run prisma:push
-npm run prisma:generate
-```
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-### 4. Get YouTube refresh token (first time only)
-```bash
-npx tsx src/scripts/getRefreshToken.ts
-```
-Paste the token into `.env` as `YOUTUBE_REFRESH_TOKEN`.
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
----
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Running
+## Learn More
 
-### Full pipeline (one time)
-```bash
-npm run auto:once
-```
+To learn more about Next.js, take a look at the following resources:
 
-### 4-hour scheduled loop
-```bash
-npm run auto
-```
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
 
-### Individual steps
-```bash
-npm run scrape               # Fetch news (Africa excluded)
-npm run process-articles     # Generate AI scripts via Mistral
-npm run generate-videos      # Compile 30-minute video
-npm run upload-videos        # Upload to YouTube
-```
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-### Dry run (test without executing)
-```bash
-npm run pipeline:dry
-```
+## Deploy on Vercel
 
----
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
-## Media Sources (in priority order)
-| Media Type | Source | Key needed? |
-|---|---|---|
-| Stock footage | Pexels Videos | Yes (free) |
-| Stock footage | Pixabay Videos | Yes (free) |
-| News footage | Internet Archive | No |
-| AI images | Pollinations.ai | No |
-| Stock images | Pexels Photos | Yes (free) |
-| Fallback | Generated background | No |
-
----
-
-## File Output
-```
-backend/
-  output/
-    videos/     ← final 30-min mp4 files
-    audio/      ← cached TTS voiceover files
-    media/      ← downloaded images/footage (auto-cleaned)
-    tmp/        ← intermediate segments (auto-cleaned)
-```
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
