@@ -19,7 +19,8 @@ export default async function pipelineRoutes(server: FastifyInstance) {
     console.log('🚀 Pipeline triggered via cron job');
     
     // Run the pipeline in the background (don't wait for completion)
-    execAsync('npm run full-run', { cwd: process.cwd() })
+    // Using the full-run script from package.json
+    execAsync('npm run full-run', { cwd: '/opt/render/project/src/backend' })
       .then(() => console.log('✅ Pipeline completed'))
       .catch(err => console.error('❌ Pipeline failed:', err));
     
@@ -30,8 +31,8 @@ export default async function pipelineRoutes(server: FastifyInstance) {
     };
   });
   
-  // Simple ping endpoint to keep service alive (optional)
-  server.get('/api/ping', async () => {
-    return { status: 'alive', timestamp: new Date().toISOString() };
+  // Simple health check for the pipeline endpoint
+  server.get('/api/pipeline-health', async () => {
+    return { status: 'ready', timestamp: new Date().toISOString() };
   });
 }
