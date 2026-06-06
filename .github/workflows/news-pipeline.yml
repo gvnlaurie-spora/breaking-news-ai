@@ -1,0 +1,79 @@
+name: Breaking News AI Broadcast
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+    - cron: '0 13 * * *'
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  broadcast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg espeak pipx
+          pipx install edge-tts
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install Node dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Push database schema
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma db push --accept-data-loss
+
+      - name: Scrape news
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run scrape
+
+      - name: Process articles with AI
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        run: npm run process-articles
+
+      - name: Generate broadcast video
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_ENDPOINT: ${{ secrets.AZURE_SPEECH_ENDPOINT }}
+        run: npm run generate-videos
+
+      - name: Upload to YouTube
+        working-directory: backend
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REDIRECT_URI: ${{ secrets.YOUTUBE_REDIRECT_URI }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: npm run upload-videos
+
+      - name: Save video as backup
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: broadcast-${{ github.run_id }}
+          path: backend/output/**/*.mp4
+          retention-days: 3
