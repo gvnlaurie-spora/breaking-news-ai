@@ -46,3 +46,6 @@ backend/prisma/dev.db-journal
 *.mp4
 *.jpg
 *.png
+!.github/
+!.github/workflows/
+!.github/workflows/news-pipeline.yml
