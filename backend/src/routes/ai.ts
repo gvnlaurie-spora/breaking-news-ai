@@ -8,7 +8,7 @@ export default async function aiRoutes(server: FastifyInstance) {
     const { articleId } = request.params as { articleId: string };
     try {
       const result = await orchestrateArticle(articleId);
-      return { summary: result.summary, hook: result.hook, script: result.script };
+      return { summary: result.summary, hook: result.hook, script: result.scriptId };
     } catch (error) {
       reply.code(500).send({ error: 'Failed to generate summary' });
     }
