@@ -7,13 +7,11 @@ import articleRoutes from './routes/articles';
 import pipelineRoutes from "./routes/pipeline";
 
 const server = fastify({ logger: true });
-
 server.register(fastifyCors, { origin: true });
 server.register(fastifyHelmet);
-
 server.register(healthRoute, { prefix: '/api' });
-server.register(articleRoutes, { prefix: '/api' });
 server.register(pipelineRoutes, { prefix: '/api' });
+server.register(articleRoutes, { prefix: '/api/articles' });
 
 server.get('/health', async () => ({
   status: 'ok',
@@ -28,7 +26,6 @@ server.get('/', async () => ({
 }));
 
 const port = process.env.PORT ? parseInt(process.env.PORT) : 4000;
-
 const start = async () => {
   try {
     await server.listen({ port, host: "0.0.0.0" });
@@ -38,6 +35,5 @@ const start = async () => {
     process.exit(1);
   }
 };
-
 start();
 export default server;
