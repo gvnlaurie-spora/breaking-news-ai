@@ -4,6 +4,8 @@ import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
 import healthRoute from './routes/health';
 import articleRoutes from './routes/articles';
+  server.register(pipelineRoutes);
+import pipelineRoutes from "./routes/pipeline";
 
 const server = fastify({ logger: true });
 
@@ -14,6 +16,7 @@ server.register(fastifyHelmet);
 // Register routes with /api prefix
 server.register(healthRoute, { prefix: '/api' });
 server.register(articleRoutes, { prefix: '/api' });
+  server.register(pipelineRoutes);
 
 // Root health check for load balancers
 server.get('/health', async () => ({

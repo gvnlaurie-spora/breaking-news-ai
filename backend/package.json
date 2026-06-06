@@ -16,7 +16,8 @@
     "auto": "tsx src/scripts/auto-pipeline.ts",
     "auto:once": "tsx src/scripts/auto-pipeline.ts --once",
     "pipeline:dry": "tsx src/scripts/auto-pipeline.ts --dry-run",
-    "pipeline:scrape-only": "npm run scrape && npm run process-articles"
+    "pipeline:scrape-only": "npm run scrape && npm run process-articles",
+    "full-run": "npm run scrape && npm run process-articles && npm run generate-videos && npm run upload-videos"
   },
   "keywords": [],
   "author": "",
