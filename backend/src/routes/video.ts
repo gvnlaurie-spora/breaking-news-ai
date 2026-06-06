@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../utils/prisma";
-import { generateSimpleVideo } from "../services/video/generator";
+import { compileNewsVideo as generateSimpleVideo } from "../services/video/compiler";
 import fs from 'fs/promises';
 
 const videoRoutes: FastifyPluginAsync = async (fastify) => {

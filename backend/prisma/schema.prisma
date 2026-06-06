@@ -37,6 +37,7 @@ model Script {
   article   Article  @relation(fields: [articleId], references: [id])
   content   String
   hook      String?
+  summary   String?
   filePath  String?   // Changed from videoUrl to filePath
   status    String   @default("pending")
   createdAt DateTime @default(now())

@@ -1,12 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.cleanArticleForAI = cleanArticleForAI;
-// This function converts null values to undefined (what TypeScript expects)
 function cleanArticleForAI(article) {
     return {
-        title: article.title,
-        description: article.description === null ? undefined : article.description,
-        content: article.content,
-        category: article.category === null ? '' : article.category
+        id: article.id,
+        title: (article.title || "").substring(0, 200),
+        description: (article.description || "").substring(0, 500),
+        category: article.category || "general",
+        region: article.region || "Global",
     };
 }

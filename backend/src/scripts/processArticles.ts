@@ -2,17 +2,18 @@ import "dotenv/config";
 import { prisma } from "../utils/prisma";
 import { orchestrateArticle } from "../services/ai/orchestrator";
 
-async function processAllArticles() {
-  console.log("🔄 Starting AI processing for all articles...");
+const BATCH_SIZE = 10; // Process up to 10 articles per run
 
-  // --- Find articles without scripts ---
+async function processArticles() {
+  console.log("🤖 Starting AI script generation...");
+
+  // Get articles that don't have scripts yet
   const articles = await prisma.article.findMany({
     where: {
-      scripts: {
-        none: {},
-      },
+      scripts: { none: {} },
     },
-    take: 10, // Process 10 at a time to avoid rate limits
+    orderBy: { publishedAt: "desc" },
+    take: BATCH_SIZE,
   });
 
   if (articles.length === 0) {
@@ -21,24 +22,32 @@ async function processAllArticles() {
     return;
   }
 
-  console.log(`📰 Found ${articles.length} articles to process.`);
+  console.log(`📰 Processing ${articles.length} articles with Mistral AI...\n`);
 
-  // --- Process each article ---
+  let success = 0;
+  let failed = 0;
+
   for (const article of articles) {
     try {
+      console.log(`📝 [${success + failed + 1}/${articles.length}] ${article.title.substring(0, 70)}...`);
       await orchestrateArticle(article.id);
-      console.log(`✅ Processed: ${article.title.substring(0, 50)}...`);
-    } catch (error) {
-      console.error(`❌ Failed to process article ${article.id}:`, error);
+      console.log(`  ✅ Script generated`);
+      success++;
+
+      // Small delay to avoid rate limits
+      await new Promise(r => setTimeout(r, 500));
+    } catch (err: any) {
+      console.error(`  ❌ Failed: ${err.message}`);
+      failed++;
     }
   }
 
-  console.log("✅ AI processing completed.");
+  console.log(`\n✅ Done. Success: ${success} | Failed: ${failed}`);
   await prisma.$disconnect();
 }
 
-processAllArticles().catch((error) => {
-  console.error("Fatal error:", error);
-  prisma.$disconnect();
+processArticles().catch(async (err) => {
+  console.error("Fatal:", err);
+  await prisma.$disconnect();
   process.exit(1);
 });

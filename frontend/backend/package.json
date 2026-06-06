@@ -1,0 +1,57 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "NODE_NO_WARNINGS=1 tsx watch src/server.ts",
+    "scrape": "tsx src/scripts/scrape.ts",
+    "process-articles": "tsx src/scripts/processArticles.ts",
+    "generate-videos": "NODE_OPTIONS=--dns-result-order=ipv4first tsx src/scripts/generate-videos.ts",
+    "upload-videos": "tsx src/scripts/uploadVideos.ts",
+    "build": "tsc --skipLibCheck",
+    "start": "NODE_NO_WARNINGS=1 node dist/server.js",
+    "prisma:push": "prisma db push",
+    "prisma:generate": "prisma generate",
+    "prisma:studio": "prisma studio"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Backend for BREAKING NEWS AI",
+  "dependencies": {
+    "@fastify/cors": "^8.5.0",
+    "@fastify/helmet": "^11.0.0",
+    "@fastify/multipart": "^10.0.0",
+    "@fastify/rate-limit": "^9.1.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@mistralai/mistralai": "^1.0.0",
+    "@prisma/client": "^5.22.0",
+    "axios": "^1.16.1",
+    "bullmq": "^5.1.0",
+    "canvas": "^3.2.3",
+    "dotenv": "^16.3.1",
+    "fastify": "^4.28.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "googleapis": "^173.0.0",
+    "ioredis": "^5.3.2",
+    "microsoft-cognitiveservices-speech-sdk": "^1.13.1",
+    "node-cron": "^4.2.1",
+    "node-webvtt": "^1.0.0",
+    "ollama": "^0.6.3",
+    "prisma": "^5.7.0",
+    "rss-parser": "^3.12.0",
+    "sqlite3": "^6.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0 <22.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/node": "^25.9.1",
+    "@types/node-cron": "^3.0.11",
+    "nodemon": "^3.0.2"
+  }
+}

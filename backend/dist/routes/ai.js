@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const prisma_1 = require("../utils/prisma");
-const mistral_1 = require("../services/ai/mistral");
+const orchestrator_1 = require("../services/ai/orchestrator");
 const aiRoutes = async (fastify) => {
     // Generate summary for an article
     fastify.post("/ai/summarize/:articleId", async (request, reply) => {
@@ -12,7 +12,7 @@ const aiRoutes = async (fastify) => {
         if (!article) {
             return reply.status(404).send({ error: "Article not found" });
         }
-        const summary = await (0, mistral_1.generateSummary)({
+        const summary = await (0, orchestrator_1.generateSummaryOllama)({
             title: article.title,
             description: article.description || "",
             content: article.content || ""
@@ -28,7 +28,7 @@ const aiRoutes = async (fastify) => {
         if (!article) {
             return reply.status(404).send({ error: "Article not found" });
         }
-        const hook = await (0, mistral_1.generateHook)({
+        const hook = await (0, orchestrator_1.generateHookOllama)({
             title: article.title,
             category: article.category || "general"
         });
@@ -43,7 +43,7 @@ const aiRoutes = async (fastify) => {
         if (!article) {
             return reply.status(404).send({ error: "Article not found" });
         }
-        const script = await (0, mistral_1.generateScript)({
+        const script = await (0, orchestrator_1.generateScriptOllama)({
             title: article.title,
             description: article.description || "",
             content: article.content || "",

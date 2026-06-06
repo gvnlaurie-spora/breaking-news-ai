@@ -1,78 +1,57 @@
-import axios from "axios";
-import fs from "fs";
+import { execFile } from "child_process";
+import { existsSync, mkdirSync } from "fs";
+import { promisify } from "util";
 import path from "path";
 
-const AZURE_SPEECH_KEY = process.env.AZURE_SPEECH_KEY!;
-const AZURE_SPEECH_ENDPOINT = process.env.AZURE_SPEECH_ENDPOINT!;
+const execFileAsync = promisify(execFile);
+
+const VOICE_MAP = {
+  male: "en-US-ChristopherNeural",
+  female: "en-US-JennyNeural",
+};
+
+async function generateWithEdgeTts(text: string, outputPath: string, voice: string): Promise<void> {
+  const dir = path.dirname(outputPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  // edge-tts outputs to mp3 directly
+  await execFileAsync(
+    "edge-tts",
+    ["--voice", voice, "--text", text.substring(0, 3000), "--write-media", outputPath],
+    { timeout: 60_000 }
+  );
+}
+
+async function generateWithEspeak(text: string, outputPath: string): Promise<void> {
+  const dir = path.dirname(outputPath);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  const clean = text.replace(/[^a-zA-Z0-9 .,!?'\-]/g, " ").trim().substring(0, 2000);
+  const wavPath = outputPath.replace(/\.mp3$/, ".wav");
+
+  await execFileAsync("espeak", ["-v", "en-us", "-s", "145", "-g", "8", "-w", wavPath, clean], {
+    timeout: 60_000,
+  });
+  await execFileAsync("ffmpeg", ["-y", "-i", wavPath, "-c:a", "libmp3lame", "-q:a", "2", outputPath], {
+    timeout: 30_000,
+  });
+  try { require("fs").unlinkSync(wavPath); } catch { /* ignore */ }
+}
 
 export async function generateTTS(
   text: string,
   outputPath: string,
   voice: "male" | "female" = "male"
 ): Promise<void> {
+  const voiceName = VOICE_MAP[voice];
+  console.log(`  🎤 Edge TTS: generating ${path.basename(outputPath)}...`);
+
   try {
-    // Ensure output directory exists
-    const dir = path.dirname(outputPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    // Azure Neural TTS voice mapping
-    const voiceMap = {
-      male: "en-US-ChristopherNeural",
-      female: "en-US-JennyNeural",
-    };
-    const voiceName = voiceMap[voice] || voiceMap.male;
-
-    // Create SSML request body (Azure requires SSML format)
-    const ssml = `<?xml version="1.0" encoding="UTF-8"?>
-<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-  <voice name="${voiceName}">
-    <prosody rate="0%">
-      ${text}
-    </prosody>
-  </voice>
-</speak>`;
-
-    // Remove trailing slash from endpoint if present
-    const endpoint = AZURE_SPEECH_ENDPOINT.replace(/\/$/, '');
-    
-    // Correct Azure TTS API URL
-    const apiUrl = `${endpoint}/cognitiveservices/v1`;
-
-    console.log(`🎤 Calling Azure TTS API: ${apiUrl}`);
-
-    const response = await axios.post(
-      apiUrl,
-      ssml,
-      {
-        headers: {
-          "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
-          "Content-Type": "application/ssml+xml",
-          "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
-          "User-Agent": "BreakingNewsAI/1.0",
-        },
-        responseType: "arraybuffer",
-      }
-    );
-
-    // Save the audio file
-    fs.writeFileSync(outputPath, Buffer.from(response.data));
-    console.log(`✅ Azure TTS generated at: ${outputPath}`);
-  } catch (error) {
-    if (axios.isAxiosError(error)) {
-      console.error("❌ Azure TTS generation failed:");
-      console.error(`   Status: ${error.response?.status}`);
-      console.error(`   Message: ${error.message}`);
-      if (error.response?.status === 401) {
-        console.error("   Invalid API key. Please check your AZURE_SPEECH_KEY");
-      } else if (error.response?.status === 404) {
-        console.error("   Endpoint not found. Please check your AZURE_SPEECH_ENDPOINT");
-        console.error("   Expected format: https://your-region.api.cognitive.microsoft.com/");
-      }
-    } else {
-      console.error("❌ Azure TTS generation failed:", error);
-    }
-    throw error;
+    await generateWithEdgeTts(text, outputPath, voiceName);
+    console.log(`  ✅ TTS saved: ${path.basename(outputPath)}`);
+  } catch (edgeErr) {
+    console.warn(`  ⚠️  edge-tts failed, using espeak fallback:`, (edgeErr as Error).message);
+    await generateWithEspeak(text, outputPath);
+    console.log(`  ✅ TTS saved (espeak): ${path.basename(outputPath)}`);
   }
 }

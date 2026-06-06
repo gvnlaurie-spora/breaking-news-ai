@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const prisma_1 = require("../utils/prisma");
-const generator_1 = require("../services/video/generator");
+const compiler_1 = require("../services/video/compiler");
 const promises_1 = __importDefault(require("fs/promises"));
 const videoRoutes = async (fastify) => {
     // Generate video for an article
@@ -22,7 +22,7 @@ const videoRoutes = async (fastify) => {
             return reply.status(404).send({ error: "No script found for this article. Run process-articles first." });
         }
         try {
-            const videoPath = await (0, generator_1.generateSimpleVideo)({
+            const videoPath = await (0, compiler_1.compileNewsVideo)({
                 title: article.title,
                 script: script
             });

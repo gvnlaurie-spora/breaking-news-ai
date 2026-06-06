@@ -1,0 +1,30 @@
+1
+00:00:00,000 --> 00:00:03,000
+**[HOOK]**
+*"President Trump is making headlines—not for politics, but for his health!
+
+2
+00:00:03,000 --> 00:00:06,000
+His doctor just dropped a bombshell after his annual checkup…"*
+
+**[NEWS]**
+*"Dr.
+
+3
+00:00:06,000 --> 00:00:09,000
+Harold Bornstein confirmed the former president is in ‘excellent health,’ with no major concerns after his latest physical.
+
+4
+00:00:09,000 --> 00:00:12,000
+The 78-year-old showed strength, energy, and even joked about his age—calling himself a ‘young man’ compared to rivals.
+
+5
+00:00:12,000 --> 00:00:15,000
+But critics are already questioning the timing of the release, just days before a key debate."*
+
+**[WRAP]**
+*"Will this report change the narrative?
+
+6
+00:00:15,000 --> 00:00:18,000
+Share your thoughts—#TrumpHealth—before the next headline breaks!"*

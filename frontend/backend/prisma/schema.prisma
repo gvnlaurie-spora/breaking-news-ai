@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+
+model Source {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  url      String
+  articles Article[]
+}
+
+model Article {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  content     String?
+  url         String    @unique
+  sourceId    String
+  source      Source    @relation(fields: [sourceId], references: [id])
+  publishedAt DateTime
+  region      String?
+  category    String?
+  isVerified  Boolean   @default(false)
+  confidence  Float     @default(0.5)
+  scripts     Script[]
+}
+
+model Script {
+  id        String   @id @default(cuid())
+  articleId String   @unique
+  article   Article  @relation(fields: [articleId], references: [id])
+  content   String
+  hook      String?
+  filePath  String?   // Changed from videoUrl to filePath
+  status    String   @default("pending")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  videos    Video[]
+}
+
+model Video {
+  id          String   @id @default(cuid())
+  scriptId    String   @unique
+  script      Script   @relation(fields: [scriptId], references: [id])
+  filePath    String   // The generated video file path
+  title       String?  // Optional title
+  description String?  // Optional description
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

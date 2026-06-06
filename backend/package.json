@@ -1,6 +1,6 @@
 {
   "name": "backend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "dist/server.js",
   "scripts": {
     "dev": "NODE_NO_WARNINGS=1 tsx watch src/server.ts",
@@ -12,12 +12,16 @@
     "start": "NODE_NO_WARNINGS=1 node dist/server.js",
     "prisma:push": "prisma db push",
     "prisma:generate": "prisma generate",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "auto": "tsx src/scripts/auto-pipeline.ts",
+    "auto:once": "tsx src/scripts/auto-pipeline.ts --once",
+    "pipeline:dry": "tsx src/scripts/auto-pipeline.ts --dry-run",
+    "pipeline:scrape-only": "npm run scrape && npm run process-articles"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "Backend for BREAKING NEWS AI",
+  "description": "Breaking News AI — 30-minute compiled news video pipeline",
   "dependencies": {
     "@fastify/cors": "^8.5.0",
     "@fastify/helmet": "^11.0.0",

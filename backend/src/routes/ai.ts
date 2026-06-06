@@ -1,6 +1,6 @@
 import { FastifyPluginAsync } from "fastify";
 import { prisma } from "../utils/prisma";
-import { generateSummary, generateHook, generateScript } from "../services/ai/mistral";
+import { generateSummaryOllama as generateSummary, generateHookOllama as generateHook, generateScriptOllama as generateScript } from "../services/ai/orchestrator";
 
 const aiRoutes: FastifyPluginAsync = async (fastify) => {
   // Generate summary for an article

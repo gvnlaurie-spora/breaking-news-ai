@@ -1,38 +1,72 @@
-import { cleanArticleForAI } from './cleanArticle';
+import "dotenv/config";
+import { Mistral } from "@mistralai/mistralai";
+import { prisma } from "../../utils/prisma";
+import { cleanArticleForAI } from "./cleanArticle";
 
-// These are placeholder functions - replace with your actual imports
-async function generateSummaryOllama(article: any) {
-  console.log('Generating summary for:', article.title);
-  return `Summary of ${article.title}`;
+const mistral = new Mistral({ apiKey: process.env.MISTRAL_API_KEY! });
+
+const MODEL = "mistral-small-latest"; // fast + cheap
+
+async function callMistral(prompt: string): Promise<string> {
+  const res = await mistral.chat.complete({
+    model: MODEL,
+    messages: [{ role: "user", content: prompt }],
+    maxTokens: 600,
+    temperature: 0.7,
+  });
+  const content = res.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Empty Mistral response");
+  return typeof content === "string" ? content.trim() : content[0]?.type === "text" ? content[0].text.trim() : "";
 }
 
-async function generateHookOllama(article: any) {
-  console.log('Generating hook for:', article.title);
-  return `Breaking: ${article.title}`;
+export async function generateScript(article: { title: string; description?: string | null }): Promise<{
+  hook: string;
+  summary: string;
+  content: string;
+}> {
+  const desc = article.description || "";
+
+  const hook = await callMistral(
+    `You are a TV news anchor. Write a single punchy HOOK sentence (max 20 words) to open a news story. 
+No preamble, just the hook sentence.
+Story: "${article.title}"`
+  );
+
+  const summary = await callMistral(
+    `Summarise this news story in exactly 2 sentences for a TV broadcast. Be factual, neutral, professional.
+Title: "${article.title}"
+Details: "${desc}"`
+  );
+
+  const content = await callMistral(
+    `Write a 60-second TV news script (approximately 150 words) for this story. 
+- Start with the hook already provided
+- Use clear, spoken English — no jargon
+- Include: what happened, where, who is involved, why it matters
+- End with a forward-looking statement
+- Do NOT include stage directions, [ANCHOR], or formatting tags
+- Just the spoken words only
+
+Hook: ${hook}
+Story: "${article.title}"
+Background: "${desc}"`
+  );
+
+  return { hook, summary, content };
 }
 
-async function generateScriptOllama(article: any) {
-  console.log('Generating script for:', article.title);
-  return `Script content for ${article.title}`;
-}
+export async function orchestrateArticle(articleId: string) {
+  const article = await prisma.article.findUnique({ where: { id: articleId } });
+  if (!article) throw new Error(`Article not found: ${articleId}`);
 
-// Main orchestrator function
-export async function orchestrateArticle(article: any) {
-  // Clean the article data before passing to AI functions
-  const cleanArticle = cleanArticleForAI(article);
-  
-  // Now pass the cleaned article to each function
-  const summary = await generateSummaryOllama(cleanArticle);
-  const hook = await generateHookOllama(cleanArticle);
-  const script = await generateScriptOllama(cleanArticle);
-  
-  return {
-    summary,
-    hook,
-    script,
-    originalArticle: article
-  };
-}
+  const clean = cleanArticleForAI(article);
+  const { hook, summary, content } = await generateScript(clean);
 
-// Keep your existing functions if they're called elsewhere
-export { generateSummaryOllama, generateHookOllama, generateScriptOllama };
+  const script = await prisma.script.upsert({
+    where: { articleId: article.id },
+    update: { hook, summary, content, status: "ready" },
+    create: { articleId: article.id, hook, summary, content, status: "ready" },
+  });
+
+  return { hook, summary, content, scriptId: script.id, originalArticle: article };
+}
