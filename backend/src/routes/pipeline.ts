@@ -16,7 +16,7 @@ function getShowForTime(): string {
 }
 
 // Health check endpoint (no auth required)
-router.get("/api/pipeline-health", (req: Request, res: Response) => {
+router.get("/pipeline-health", (req: Request, res: Response) => {
   res.json({ 
     status: "ok", 
     timestamp: new Date().toISOString(),
@@ -25,7 +25,7 @@ router.get("/api/pipeline-health", (req: Request, res: Response) => {
 });
 
 // Trigger pipeline endpoint
-router.get("/api/pipeline/trigger", (req: Request, res: Response) => {
+router.get("/pipeline/trigger", (req: Request, res: Response) => {
   const { secret } = req.query;
   const cronSecret = process.env.CRON_SECRET;
   
