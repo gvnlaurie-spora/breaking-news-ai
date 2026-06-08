@@ -148,11 +148,13 @@ app.post('/api/run-pipeline/:show', (req, res) => {
 app.use((req, res) => {
     res.status(404).json({ error: 'not found', path: req.path });
 });
-app.listen(PORT, () => {
-    console.log(`[server] Cron trigger listening on :${PORT}`);
-    console.log(`[server] Endpoints:`);
-    for (const s of config_1.SHOWS) {
-        console.log(`  POST /api/run-pipeline/${s.id}  →  ${s.label}`);
+app.listen(PORT, '0.0.0.0', () => {
+    {
+        console.log(`[server] Cron trigger listening on :${PORT}`);
+        console.log(`[server] Endpoints:`);
+        for (const s of config_1.SHOWS) {
+            console.log(`  POST /api/run-pipeline/${s.id}  →  ${s.label}`);
+        }
     }
 });
 // Graceful shutdown
