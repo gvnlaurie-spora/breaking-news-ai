@@ -4,51 +4,49 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.generateTTS = generateTTS;
-const axios_1 = __importDefault(require("axios"));
-const fs_1 = __importDefault(require("fs"));
+const child_process_1 = require("child_process");
+const fs_1 = require("fs");
+const util_1 = require("util");
 const path_1 = __importDefault(require("path"));
-async function generateTTS(text, outputPath, voice = "male") {
-    const AZURE_SPEECH_KEY = process.env.AZURE_SPEECH_KEY;
-    const AZURE_SPEECH_ENDPOINT = process.env.AZURE_SPEECH_ENDPOINT;
-    if (!AZURE_SPEECH_KEY || !AZURE_SPEECH_ENDPOINT) {
-        throw new Error("AZURE_SPEECH_KEY or AZURE_SPEECH_ENDPOINT not set in .env");
-    }
+const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
+const VOICE_MAP = {
+    male: "en-US-ChristopherNeural",
+    female: "en-US-JennyNeural",
+};
+async function generateWithEdgeTts(text, outputPath, voice) {
     const dir = path_1.default.dirname(outputPath);
-    if (!fs_1.default.existsSync(dir))
-        fs_1.default.mkdirSync(dir, { recursive: true });
-    const voiceMap = {
-        male: "en-US-ChristopherNeural",
-        female: "en-US-JennyNeural",
-    };
-    const voiceName = voiceMap[voice];
-    // Sanitise text for SSML
-    const safeText = text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .substring(0, 3000); // Azure limit
-    const ssml = `<?xml version="1.0" encoding="UTF-8"?>
-<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">
-  <voice name="${voiceName}">
-    <prosody rate="-5%" pitch="0%">
-      ${safeText}
-    </prosody>
-  </voice>
-</speak>`;
-    const endpoint = AZURE_SPEECH_ENDPOINT.replace(/\/$/, '');
-    const apiUrl = `${endpoint}/cognitiveservices/v1`;
-    console.log(`  🎤 Azure TTS: generating ${path_1.default.basename(outputPath)}...`);
-    const response = await axios_1.default.post(apiUrl, ssml, {
-        headers: {
-            "Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY,
-            "Content-Type": "application/ssml+xml",
-            "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
-            "User-Agent": "BreakingNewsAI/2.0",
-        },
-        responseType: "arraybuffer",
+    if (!(0, fs_1.existsSync)(dir))
+        (0, fs_1.mkdirSync)(dir, { recursive: true });
+    // edge-tts outputs to mp3 directly
+    await execFileAsync("edge-tts", ["--voice", voice, "--text", text.substring(0, 3000), "--write-media", outputPath], { timeout: 60000 });
+}
+async function generateWithEspeak(text, outputPath) {
+    const dir = path_1.default.dirname(outputPath);
+    if (!(0, fs_1.existsSync)(dir))
+        (0, fs_1.mkdirSync)(dir, { recursive: true });
+    const clean = text.replace(/[^a-zA-Z0-9 .,!?'\-]/g, " ").trim().substring(0, 2000);
+    const wavPath = outputPath.replace(/\.mp3$/, ".wav");
+    await execFileAsync("espeak", ["-v", "en-us", "-s", "145", "-g", "8", "-w", wavPath, clean], {
+        timeout: 60000,
+    });
+    await execFileAsync("ffmpeg", ["-y", "-i", wavPath, "-c:a", "libmp3lame", "-q:a", "2", outputPath], {
         timeout: 30000,
     });
-    fs_1.default.writeFileSync(outputPath, Buffer.from(response.data));
-    console.log(`  ✅ TTS saved: ${path_1.default.basename(outputPath)}`);
+    try {
+        require("fs").unlinkSync(wavPath);
+    }
+    catch { /* ignore */ }
+}
+async function generateTTS(text, outputPath, voice = "male") {
+    const voiceName = VOICE_MAP[voice];
+    console.log(`  🎤 Edge TTS: generating ${path_1.default.basename(outputPath)}...`);
+    try {
+        await generateWithEdgeTts(text, outputPath, voiceName);
+        console.log(`  ✅ TTS saved: ${path_1.default.basename(outputPath)}`);
+    }
+    catch (edgeErr) {
+        console.warn(`  ⚠️  edge-tts failed, using espeak fallback:`, edgeErr.message);
+        await generateWithEspeak(text, outputPath);
+        console.log(`  ✅ TTS saved (espeak): ${path_1.default.basename(outputPath)}`);
+    }
 }

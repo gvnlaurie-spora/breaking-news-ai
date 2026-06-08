@@ -1,114 +1,154 @@
 import "dotenv/config";
-// @ts-ignore
-import Parser from "rss-parser";
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 import { prisma } from "../utils/prisma";
-import { filterNews, categoriseArticle, isAfricanNews } from "./filter";
+import { categoriseArticle, isAfricanNews } from "./filter";
 
-const parser = new Parser({
-  timeout: 15000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  }
-});
+const CLIPS_DIR = path.resolve(process.cwd(), "media", "clips");
+fs.mkdirSync(CLIPS_DIR, { recursive: true });
 
-const RSS_FEEDS = [
-  { name: "BBC",          url: "https://feeds.bbci.co.uk/news/rss.xml",                         region: "Europe" },
-  { name: "Al Jazeera",   url: "https://www.aljazeera.com/xml/rss/all.xml",                      region: "Middle East" },
-  { name: "DW",           url: "https://rss.dw.com/rdf/rss-en-all",                              region: "Europe" },
-  { name: "TechCrunch",   url: "https://techcrunch.com/feed/",                                   region: "USA" },
-  { name: "The Guardian", url: "https://www.theguardian.com/world/rss",                          region: "Europe" },
-  { name: "NY Times",     url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",      region: "USA" },
-  { name: "Fox News",     url: "https://moxie.foxnews.com/google-publisher/latest.xml",          region: "USA" },
-  { name: "NPR",          url: "https://feeds.npr.org/1001/rss.xml",                             region: "USA" },
-  { name: "Reuters",      url: "https://feeds.reuters.com/reuters/topNews",                      region: "Global" },
-  { name: "AP News",      url: "https://rsshub.app/apnews/topics/apf-topnews",                   region: "Global" },
+const NEWS_CHANNELS = [
+  { name: "ABC News",     handle: "@ABCNews",         region: "USA" },
+  { name: "BBC News",     handle: "@BBCNews",          region: "Europe" },
+  { name: "DW News",      handle: "@DWNews",           region: "Europe" },
+  { name: "Euronews",     handle: "@euronews",         region: "Europe" },
+  { name: "France 24",    handle: "@France24English",  region: "Europe" },
+  { name: "Reuters",      handle: "@ReutersNews",      region: "Global" },
 ];
 
-async function fetchFeedWithRetry(url: string, maxRetries = 2, delay = 3000): Promise<any> {
-  let lastError;
-  for (let i = 0; i <= maxRetries; i++) {
-    try {
-      return await parser.parseURL(url);
-    } catch (error) {
-      lastError = error;
-      if (i < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, delay));
+interface ClipMeta {
+  id: string;
+  title: string;
+  description: string;
+  url: string;
+  channel: string;
+  region: string;
+  duration: number;
+  filePath: string;
+}
+
+function ytdlp(args: string[]): string {
+  return execSync(`yt-dlp ${args.join(" ")}`, {
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+    timeout: 180000,
+  }).trim();
+}
+
+async function fetchChannelClips(channel: { name: string; handle: string; region: string }): Promise<ClipMeta[]> {
+  console.log(`\n📡 Fetching from ${channel.name}...`);
+  const clips: ClipMeta[] = [];
+  try {
+    const json = ytdlp([
+      `"https://www.youtube.com/${channel.handle}/videos"`,
+      "--flat-playlist",
+      "--playlist-end 8",
+      "--dump-single-json",
+      "--no-warnings",
+      "--quiet",
+    ]);
+    const data = JSON.parse(json);
+    const entries = data.entries || [];
+    for (const entry of entries) {
+      if (!entry.title || !entry.id) continue;
+      if (!entry.duration || entry.duration > 600 || entry.duration < 30) continue;
+      const title = entry.title as string;
+      const description = (entry.description || "") as string;
+      if (isAfricanNews(title, description, channel.region)) {
+        console.log(`  ⏭️  Skipped (Africa): ${title.substring(0, 50)}`);
+        continue;
       }
+      clips.push({
+        id: entry.id,
+        title,
+        description: description.substring(0, 500),
+        url: `https://www.youtube.com/watch?v=${entry.id}`,
+        channel: channel.name,
+        region: channel.region,
+        duration: entry.duration,
+        filePath: path.join(CLIPS_DIR, `${entry.id}.mp4`),
+      });
     }
+    console.log(`  ✅ Found ${clips.length} clips from ${channel.name}`);
+  } catch (err: any) {
+    console.error(`  ❌ Failed ${channel.name}: ${err.message.substring(0, 100)}`);
   }
-  throw lastError;
+  return clips;
+}
+
+async function downloadClip(clip: ClipMeta): Promise<boolean> {
+  if (fs.existsSync(clip.filePath)) {
+    console.log(`  ⏭️  Already downloaded: ${clip.id}`);
+    return true;
+  }
+  console.log(`  ⬇️  Downloading: ${clip.title.substring(0, 60)}...`);
+  try {
+    ytdlp([
+      `"${clip.url}"`,
+      `-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[height<=720]"`,
+      `--merge-output-format mp4`,
+      `-o "${clip.filePath}"`,
+      "--no-playlist",
+      "--quiet",
+      "--no-warnings",
+    ]);
+    return fs.existsSync(clip.filePath);
+  } catch (err: any) {
+    console.error(`  ❌ Download failed: ${err.message.substring(0, 100)}`);
+    return false;
+  }
 }
 
 export async function scrapeNews() {
-  console.log("🔄 Starting news scraper (Africa excluded)...");
-
+  console.log("🎬 Starting YouTube clip scraper...\n");
   try {
     await prisma.$connect();
-    console.log("✅ Database connected");
-  } catch (error) {
-    console.error("❌ Database connection failed:", error);
+  } catch (err) {
+    console.error("❌ DB connection failed:", err);
     return;
   }
 
-  let totalSaved = 0;
-  let totalFiltered = 0;
-
-  for (const feed of RSS_FEEDS) {
-    console.log(`\n📰 Fetching from ${feed.name}...`);
-    try {
-      const feedData = await fetchFeedWithRetry(feed.url);
-      let savedCount = 0;
-      let filteredCount = 0;
-
-      for (const item of feedData.items) {
-        if (!item.title || !item.link) continue;
-
-        // ── AFRICA FILTER ──
-        if (isAfricanNews(item.title, item.contentSnippet || item.description || '', feed.region)) {
-          filteredCount++;
-          continue;
-        }
-
-        const category = categoriseArticle(item.title);
-
-        try {
-          await prisma.article.upsert({
-            where: { url: item.link },
-            update: {
-              title: item.title,
-              description: item.contentSnippet || item.description || "",
-              publishedAt: new Date(item.pubDate || Date.now()),
-              category,
-            },
-            create: {
-              title: item.title,
-              description: item.contentSnippet || item.description || "",
-              url: item.link,
-              publishedAt: new Date(item.pubDate || Date.now()),
-              category,
-              region: feed.region,
-              source: {
-                connectOrCreate: {
-                  where: { name: feed.name },
-                  create: { name: feed.name, url: feed.url }
-                }
-              }
-            }
-          });
-          savedCount++;
-        } catch (dbError: any) {
-          // Skip duplicates silently
-        }
-      }
-
-      console.log(`📊 ${feed.name}: saved ${savedCount}, filtered (Africa) ${filteredCount}`);
-      totalSaved += savedCount;
-      totalFiltered += filteredCount;
-    } catch (error: any) {
-      console.error(`❌ FAILED ${feed.name}:`, error.message);
-    }
+  const allClips: ClipMeta[] = [];
+  for (const channel of NEWS_CHANNELS) {
+    const clips = await fetchChannelClips(channel);
+    allClips.push(...clips);
   }
 
-  console.log(`\n✅ Scraping done. Saved: ${totalSaved} | Africa filtered: ${totalFiltered}`);
+  allClips.sort((a, b) => b.duration - a.duration);
+  const selected = allClips.slice(0, 15);
+  console.log(`\n📋 Downloading ${selected.length} clips...`);
+
+  let saved = 0;
+  for (const clip of selected) {
+    const ok = await downloadClip(clip);
+    if (!ok) continue;
+    const category = categoriseArticle(clip.title);
+    try {
+      await prisma.article.upsert({
+        where: { url: clip.url },
+        update: { title: clip.title, description: clip.description, publishedAt: new Date(), category, content: clip.filePath },
+        create: {
+          title: clip.title,
+          description: clip.description,
+          url: clip.url,
+          publishedAt: new Date(),
+          category,
+          region: clip.region,
+          content: clip.filePath,
+          source: {
+            connectOrCreate: {
+              where: { name: clip.channel },
+              create: { name: clip.channel, url: `https://www.youtube.com` }
+            }
+          }
+        }
+      });
+      saved++;
+      console.log(`  💾 Saved: ${clip.title.substring(0, 60)}`);
+    } catch {}
+  }
+
+  console.log(`\n✅ Done. ${saved} clips saved.`);
   await prisma.$disconnect();
 }

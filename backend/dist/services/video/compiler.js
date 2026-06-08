@@ -1,8 +1,4 @@
 "use strict";
-// ============================================================
-// compiler.ts — Build ONE 30-minute compilation video
-// Structure: Intro → [Story + Transition] x 8-10 → Outro
-// ============================================================
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -11,105 +7,155 @@ exports.compileNewsVideo = compileNewsVideo;
 require("dotenv/config");
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const child_process_1 = require("child_process");
 const prisma_1 = require("../../utils/prisma");
 const tts_1 = require("../tts");
-const mediaFetcher_1 = require("../media/mediaFetcher");
-const ffmpeg_1 = require("../ffmpeg");
 const OUTPUT_DIR = path_1.default.resolve(process.cwd(), "output", "videos");
 const TMP_DIR = path_1.default.resolve(process.cwd(), "output", "tmp");
 const AUDIO_DIR = path_1.default.resolve(process.cwd(), "output", "audio");
-[OUTPUT_DIR, TMP_DIR, AUDIO_DIR].forEach(d => fs_1.default.mkdirSync(d, { recursive: true }));
+const W = 1920, H = 1080;
+const FF = "ffmpeg";
 const MAX_STORIES = 10;
 const MIN_STORIES = 6;
-const TARGET_DURATION = 30 * 60; // 30 minutes in seconds
-const INTRO_DURATION = 15;
-const OUTRO_DURATION = 15;
-const TRANSITION_DURATION = 5;
-// ─────────────────────────────────────────────────────────────
-// CORE: Build one story segment (visual + audio → mp4)
-// ─────────────────────────────────────────────────────────────
-async function buildOneStory(story, index, audioDuration) {
-    const segOut = path_1.default.join(TMP_DIR, `seg_${index}_${story.id}.mp4`);
-    if (fs_1.default.existsSync(segOut)) {
-        console.log(`  ⏭️  Segment already exists, reusing: ${path_1.default.basename(segOut)}`);
-        return segOut;
-    }
+[OUTPUT_DIR, TMP_DIR, AUDIO_DIR].forEach(d => fs_1.default.mkdirSync(d, { recursive: true }));
+function exec(cmd) {
+    return (0, child_process_1.execSync)(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+}
+function font(bold = false) {
+    return bold
+        ? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+}
+function safeText(text) {
+    return text
+        .replace(/'/g, "\u2019")
+        .replace(/\\/g, "")
+        .replace(/:/g, "\\:")
+        .replace(/\[/g, "\\[")
+        .replace(/\]/g, "\\]")
+        .replace(/,/g, "\\,")
+        .replace(/"/g, '\\"')
+        .replace(/%/g, "\\%")
+        .substring(0, 65);
+}
+function getMediaDuration(filePath) {
     try {
-        // 1. TTS voiceover
+        const out = exec(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`);
+        return parseFloat(out) || 60;
+    }
+    catch {
+        return 60;
+    }
+}
+async function buildIntro(outputPath) {
+    if (fs_1.default.existsSync(outputPath))
+        return;
+    const date = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+    exec(`${FF} -y \
+-f lavfi -i "color=c=0x0d0d0d:size=${W}x${H}:rate=25" \
+-vf "drawtext=text='BREAKING NEWS AI':fontcolor=0xff2222:fontsize=108:x=(w-text_w)/2:y=h*0.28:fontfile='${font(true)}', \
+drawtext=text='Your world. Right now.':fontcolor=white:fontsize=46:x=(w-text_w)/2:y=h*0.50:fontfile='${font()}', \
+drawtext=text='${safeText(date)}':fontcolor=0x888888:fontsize=30:x=(w-text_w)/2:y=h*0.64:fontfile='${font()}', \
+fade=t=in:st=0:d=1.5,fade=t=out:st=13:d=2" \
+-t 15 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "${outputPath}"`);
+}
+async function buildOutro(outputPath) {
+    if (fs_1.default.existsSync(outputPath))
+        return;
+    exec(`${FF} -y \
+-f lavfi -i "color=c=0x0d0d0d:size=${W}x${H}:rate=25" \
+-vf "drawtext=text='Thank you for watching':fontcolor=white:fontsize=58:x=(w-text_w)/2:y=h*0.33:fontfile='${font(true)}', \
+drawtext=text='BREAKING NEWS AI':fontcolor=0xff2222:fontsize=74:x=(w-text_w)/2:y=h*0.48:fontfile='${font(true)}', \
+drawtext=text='Subscribe for updates every 4 hours':fontcolor=0x999999:fontsize=34:x=(w-text_w)/2:y=h*0.65:fontfile='${font()}', \
+fade=t=in:st=0:d=2,fade=t=out:st=13:d=2" \
+-t 15 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "${outputPath}"`);
+}
+async function buildTransition(outputPath) {
+    if (fs_1.default.existsSync(outputPath))
+        return;
+    exec(`${FF} -y \
+-f lavfi -i "color=c=black:size=${W}x${H}:rate=25" \
+-vf "fade=t=in:st=0:d=0.5,fade=t=out:st=1.5:d=0.5" \
+-t 2 -c:v libx264 -preset ultrafast -pix_fmt yuv420p "${outputPath}"`);
+}
+async function buildNarrationCard(audioPath, title, source, outputPath) {
+    const duration = getMediaDuration(audioPath) + 0.5;
+    exec(`${FF} -y \
+-f lavfi -i "color=c=0x0d0d0d:size=${W}x${H}:rate=25" \
+-i "${audioPath}" \
+-vf "drawbox=x=60:y=h*0.55:w=iw-120:h=3:color=0xff2222:t=fill, \
+drawtext=text='NEXT STORY':fontcolor=0xff2222:fontsize=28:x=60:y=h*0.38:fontfile='${font(true)}', \
+drawtext=text='${safeText(title)}':fontcolor=white:fontsize=44:x=60:y=h*0.46:fontfile='${font(true)}', \
+drawtext=text='${safeText(source)}':fontcolor=0x999999:fontsize=26:x=60:y=h*0.61:fontfile='${font()}', \
+fade=t=in:st=0:d=0.5" \
+-t ${duration} \
+-c:v libx264 -preset fast \
+-c:a aac -b:a 192k \
+-map 0:v -map 1:a \
+-pix_fmt yuv420p "${outputPath}"`);
+}
+async function brandedClip(clipPath, title, source, outputPath) {
+    const duration = getMediaDuration(clipPath);
+    exec(`${FF} -y \
+-i "${clipPath}" \
+-vf "scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black, \
+drawbox=x=0:y=h-160:w=iw:h=160:color=0x0d0d0d@0.88:t=fill, \
+drawbox=x=0:y=h-160:w=10:h=160:color=0xff2222:t=fill, \
+drawtext=text='BREAKING NEWS AI':fontcolor=0xff2222:fontsize=22:x=22:y=h-148:fontfile='${font(true)}', \
+drawtext=text='${safeText(title)}':fontcolor=white:fontsize=38:x=22:y=h-112:fontfile='${font(true)}', \
+drawtext=text='Source\\: ${safeText(source)}':fontcolor=0xaaaaaa:fontsize=24:x=22:y=h-58:fontfile='${font()}'" \
+-t ${duration} \
+-c:v libx264 -preset fast \
+-c:a aac -b:a 192k \
+-pix_fmt yuv420p "${outputPath}"`);
+}
+async function buildOneStory(story, index) {
+    const segOut = path_1.default.join(TMP_DIR, `seg_${index}_${story.id}.mp4`);
+    if (fs_1.default.existsSync(segOut))
+        return segOut;
+    try {
+        // 1. TTS narration
+        const narrationText = `${story.hook} ${story.summary}`.trim();
         const audioPath = path_1.default.join(AUDIO_DIR, `${story.id}.mp3`);
         if (!fs_1.default.existsSync(audioPath)) {
-            await (0, tts_1.generateTTS)(story.content, audioPath, index % 2 === 0 ? "male" : "female");
+            console.log(`  🎤 Generating narration...`);
+            await (0, tts_1.generateTTS)(narrationText, audioPath, index % 2 === 0 ? "male" : "female");
         }
-        // Get actual audio duration via ffprobe
-        const realDuration = await getAudioDuration(audioPath);
-        const segDuration = Math.max(realDuration + 2, 30); // minimum 30s per story
-        // 2. Fetch media (images + MP4 footage)
-        console.log(`  📦 Fetching media for story ${index + 1}...`);
-        const media = await (0, mediaFetcher_1.fetchMediaForStory)(story.title, story.id);
-        // 3. Build silent visual track
-        const silentVideoPath = path_1.default.join(TMP_DIR, `visual_${story.id}.mp4`);
-        if (media.videos.length > 0) {
-            // Use real MP4 footage
-            console.log(`  🎥 Using stock footage`);
-            await (0, ffmpeg_1.prepareVideoClip)(media.videos[0], silentVideoPath, segDuration);
+        // 2. Narration title card
+        const narrationCardPath = path_1.default.join(TMP_DIR, `narr_${story.id}.mp4`);
+        console.log(`  🎬 Building narration card...`);
+        await buildNarrationCard(audioPath, story.title, story.source, narrationCardPath);
+        const parts = [narrationCardPath];
+        // 3. Real clip with branding overlay
+        if (story.clipPath && fs_1.default.existsSync(story.clipPath)) {
+            console.log(`  🎥 Branding real clip...`);
+            const brandedPath = path_1.default.join(TMP_DIR, `clip_${story.id}.mp4`);
+            await brandedClip(story.clipPath, story.title, story.source, brandedPath);
+            parts.push(brandedPath);
         }
-        else if (media.images.length > 0) {
-            // Slideshow from images — cycle through if multiple
-            console.log(`  🖼️  Building image slideshow`);
-            await (0, ffmpeg_1.imageToVideo)(media.images[0], silentVideoPath, segDuration);
+        // 4. Concat narration + clip
+        if (parts.length === 1) {
+            fs_1.default.copyFileSync(parts[0], segOut);
         }
         else {
-            // Fallback: generated dark background
-            console.log(`  🎨 Using generated background`);
-            await (0, ffmpeg_1.generateBackground)(story.title, silentVideoPath, segDuration);
-        }
-        // 4. Combine visual + voiceover + lower-third overlay
-        await (0, ffmpeg_1.buildStorySegment)({
-            videoPath: silentVideoPath,
-            audioPath,
-            title: story.title,
-            source: story.source,
-            outputPath: segOut,
-        });
-        // Cleanup intermediate visual
-        if (fs_1.default.existsSync(silentVideoPath))
-            fs_1.default.unlinkSync(silentVideoPath);
-        // Cleanup downloaded media
-        [...media.images, ...media.videos].forEach(f => {
+            const listPath = path_1.default.join(TMP_DIR, `lst_${story.id}.txt`);
+            fs_1.default.writeFileSync(listPath, parts.map(p => `file '${p}'`).join("\n"));
+            exec(`${FF} -y -f concat -safe 0 -i "${listPath}" -c copy "${segOut}"`);
             try {
-                fs_1.default.unlinkSync(f);
+                fs_1.default.unlinkSync(listPath);
             }
             catch { }
-        });
-        console.log(`  ✅ Story ${index + 1} segment built: ${path_1.default.basename(segOut)}`);
+        }
+        console.log(`  ✅ Story ${index + 1} done`);
         return segOut;
     }
     catch (err) {
-        console.error(`  ❌ Failed story ${index + 1}: ${err.message}`);
+        console.error(`  ❌ Story ${index + 1} failed: ${err.message}`);
         return null;
     }
 }
-// ─────────────────────────────────────────────────────────────
-// AUDIO DURATION via ffprobe
-// ─────────────────────────────────────────────────────────────
-function getAudioDuration(audioPath) {
-    return new Promise((resolve) => {
-        const { execSync } = require("child_process");
-        try {
-            const out = execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, { encoding: "utf8" }).trim();
-            resolve(parseFloat(out) || 60);
-        }
-        catch {
-            resolve(60);
-        }
-    });
-}
-// ─────────────────────────────────────────────────────────────
-// MAIN COMPILER
-// ─────────────────────────────────────────────────────────────
 async function compileNewsVideo() {
-    console.log("\n🎬 Starting 30-minute news compilation...");
-    // Fetch ready scripts from DB
+    console.log("\n🎬 Compiling news video...");
     const scripts = await prisma_1.prisma.script.findMany({
         where: { status: "ready" },
         include: { article: { include: { source: true } } },
@@ -117,61 +163,60 @@ async function compileNewsVideo() {
         take: MAX_STORIES,
     });
     if (scripts.length < MIN_STORIES) {
-        throw new Error(`Not enough scripts ready. Need ${MIN_STORIES}, have ${scripts.length}. Run process-articles first.`);
+        throw new Error(`Need ${MIN_STORIES} scripts, have ${scripts.length}. Run process-articles first.`);
     }
-    console.log(`📋 Building video from ${scripts.length} stories\n`);
+    console.log(`📋 ${scripts.length} stories ready\n`);
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-").substring(0, 19);
     const finalOutput = path_1.default.join(OUTPUT_DIR, `breaking-news-${timestamp}.mp4`);
     const allSegments = [];
-    // ── INTRO ──
     const introPath = path_1.default.join(TMP_DIR, "intro.mp4");
-    console.log("🎬 Building intro...");
-    await (0, ffmpeg_1.buildIntro)(introPath);
+    await buildIntro(introPath);
     allSegments.push(introPath);
-    // ── STORIES + TRANSITIONS ──
     for (let i = 0; i < scripts.length; i++) {
-        const script = scripts[i];
-        const story = {
-            id: script.id,
-            title: script.article.title,
-            content: script.content,
-            source: script.article.source?.name || "Breaking News AI",
-        };
-        console.log(`\n📰 Story ${i + 1}/${scripts.length}: ${story.title.substring(0, 60)}...`);
-        const segPath = await buildOneStory(story, i, 60);
-        if (segPath) {
-            allSegments.push(segPath);
-            // Add transition between stories (not after last one)
+        const s = scripts[i];
+        console.log(`\n📰 Story ${i + 1}/${scripts.length}: ${s.article.title.substring(0, 65)}...`);
+        const seg = await buildOneStory({
+            id: s.id,
+            title: s.article.title,
+            hook: s.hook || "",
+            summary: s.summary || s.content.substring(0, 300),
+            source: s.article.source?.name || "Breaking News AI",
+            clipPath: s.article.content || null,
+        }, i);
+        if (seg) {
+            allSegments.push(seg);
             if (i < scripts.length - 1) {
-                const transPath = path_1.default.join(TMP_DIR, `trans_${i}.mp4`);
-                await (0, ffmpeg_1.buildTransition)(transPath);
-                allSegments.push(transPath);
+                const trans = path_1.default.join(TMP_DIR, `trans_${i}.mp4`);
+                await buildTransition(trans);
+                allSegments.push(trans);
             }
         }
     }
-    // ── OUTRO ──
     const outroPath = path_1.default.join(TMP_DIR, "outro.mp4");
-    console.log("\n🎬 Building outro...");
-    await (0, ffmpeg_1.buildOutro)(outroPath);
+    await buildOutro(outroPath);
     allSegments.push(outroPath);
-    // ── CONCAT ALL SEGMENTS ──
-    await (0, ffmpeg_1.concatSegments)(allSegments, finalOutput);
-    // ── MARK SCRIPTS AS COMPLETED ──
+    const listPath = finalOutput.replace(".mp4", "_list.txt");
+    fs_1.default.writeFileSync(listPath, allSegments.map(p => `file '${p}'`).join("\n"));
+    console.log(`\n🎬 Concatenating ${allSegments.length} segments...`);
+    exec(`${FF} -y -f concat -safe 0 -i "${listPath}" -c copy "${finalOutput}"`);
+    try {
+        fs_1.default.unlinkSync(listPath);
+    }
+    catch { }
     await prisma_1.prisma.script.updateMany({
         where: { id: { in: scripts.map(s => s.id) } },
         data: { status: "completed", filePath: finalOutput },
     });
-    // ── CLEANUP TMP ──
-    console.log("\n🧹 Cleaning up temp files...");
     try {
         fs_1.default.readdirSync(TMP_DIR).forEach(f => {
-            const fp = path_1.default.join(TMP_DIR, f);
-            if (fp !== finalOutput)
-                fs_1.default.unlinkSync(fp);
+            try {
+                fs_1.default.unlinkSync(path_1.default.join(TMP_DIR, f));
+            }
+            catch { }
         });
     }
     catch { }
-    const fileSizeMB = (fs_1.default.statSync(finalOutput).size / 1024 / 1024).toFixed(1);
-    console.log(`\n✅ DONE: ${path_1.default.basename(finalOutput)} (${fileSizeMB} MB)`);
+    const sizeMB = (fs_1.default.statSync(finalOutput).size / 1024 / 1024).toFixed(1);
+    console.log(`\n✅ DONE: ${path_1.default.basename(finalOutput)} (${sizeMB} MB)`);
     return finalOutput;
 }

@@ -1,0 +1,519 @@
+#!/usr/bin/env node
+/**
+ * Breaking News AI — Production-grade compilation script
+ */
+
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import axios from 'axios';
+
+const execAsync = promisify(exec);
+
+// =============================================================================
+// Types & Constants
+// =============================================================================
+
+interface Config {
+  maxClips: number;
+  segmentDuration: number;
+  introDuration: number;
+  outputDir: string;
+  videoW: number;
+  videoH: number;
+  videoFps: number;
+  audioBitrate: string;
+  ffmpegPreset: string;
+  ffmpegCrf: number;
+  downloadConcurrency: number;
+  execTimeoutMs: number;
+  retryAttempts: number;
+  retryBaseDelayMs: number;
+  minDiskSpaceGB: number;
+  azureKey: string | undefined;
+  azureRegion: string;
+  azureVoice: string;
+  edgeTtsVoice: string;
+  dryRun: boolean;
+  cleanupBefore: boolean;
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+}
+
+interface NewsClip {
+  id: string;
+  title: string;
+  source: string;
+  url: string;
+  downloadedPath: string;
+}
+
+const NEWS_SOURCES = [
+  { name: 'BBC News',  url: 'https://www.youtube.com/@BBCNews/videos' },
+  { name: 'CNN',       url: 'https://www.youtube.com/@CNN/videos' },
+  { name: 'Sky News',  url: 'https://www.youtube.com/@SkyNews/videos' },
+  { name: 'SABC News', url: 'https://www.youtube.com/@SABCNews/videos' },
+];
+
+// =============================================================================
+// Errors & Logger
+// =============================================================================
+
+class AppError extends Error {
+  constructor(message: string, public readonly code: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = this.constructor.name;
+  }
+}
+
+const LOG_RANK: Record<Config['logLevel'], number> = { debug: 10, info: 20, warn: 30, error: 40 };
+
+class Logger {
+  constructor(private level: Config['logLevel']) {}
+  private out(level: Config['logLevel'], emoji: string, msg: string, meta?: object) {
+    if (LOG_RANK[level] < LOG_RANK[this.level]) return;
+    const ts = new Date().toISOString();
+    const m = meta ? ' ' + JSON.stringify(meta) : '';
+    const line = `[${ts}] ${level.toUpperCase().padEnd(5)} ${emoji} ${msg}${m}`;
+    if (level === 'error' || level === 'warn') console.error(line);
+    else console.log(line);
+  }
+  debug = (m: string, x?: object) => this.out('debug', '🔍', m, x);
+  info  = (m: string, x?: object) => this.out('info',  'ℹ️ ', m, x);
+  warn  = (m: string, x?: object) => this.out('warn',  '⚠️ ', m, x);
+  error = (m: string, x?: object) => this.out('error', '💥', m, x);
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+function loadConfig(): Config {
+  const num  = (k: string, d: number)  => { const v = process.env[k]; return v ? parseInt(v, 10) : d; };
+  const str  = (k: string, d: string)  => process.env[k] ?? d;
+  const bool = (k: string, d: boolean) => {
+    const v = process.env[k];
+    return v === undefined ? d : v === '1' || v.toLowerCase() === 'true';
+  };
+  return {
+    maxClips:            num('MAX_CLIPS', 8),
+    segmentDuration:     num('SEGMENT_DURATION', 180),
+    introDuration:       num('INTRO_DURATION', 5),
+    outputDir:           str('OUTPUT_DIR', path.join(process.cwd(), 'output')),
+    videoW:              num('VIDEO_W', 1280),
+    videoH:              num('VIDEO_H', 720),
+    videoFps:            num('VIDEO_FPS', 24),
+    audioBitrate:        str('AUDIO_BITRATE', '128k'),
+    ffmpegPreset:        str('FFMPEG_PRESET', 'fast'),
+    ffmpegCrf:           num('FFMPEG_CRF', 23),
+    downloadConcurrency: num('DOWNLOAD_CONCURRENCY', 3),
+    execTimeoutMs:       num('EXEC_TIMEOUT_MS', 5 * 60 * 1000),
+    retryAttempts:       num('RETRY_ATTEMPTS', 3),
+    retryBaseDelayMs:    num('RETRY_BASE_DELAY_MS', 1000),
+    minDiskSpaceGB:      num('MIN_DISK_SPACE_GB', 2),
+    azureKey:            process.env.AZURE_SPEECH_KEY,
+    azureRegion:         str('AZURE_SPEECH_REGION', 'eastus'),
+    azureVoice:          str('AZURE_VOICE', 'en-US-JennyNeural'),
+    edgeTtsVoice:        str('EDGE_TTS_VOICE', 'en-US-JennyNeural'),
+    dryRun:              bool('DRY_RUN', false),
+    cleanupBefore:       bool('CLEANUP_BEFORE', false),
+    logLevel:            str('LOG_LEVEL', 'info') as Config['logLevel'],
+  };
+}
+
+async function retry<T>(fn: () => Promise<T>, attempts: number, baseMs: number, label: string, logger: Logger): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try { return await fn(); }
+    catch (err) {
+      lastErr = err;
+      if (i === attempts) break;
+      const delay = baseMs * 2 ** (i - 1);
+      logger.warn(`${label} failed (attempt ${i}/${attempts}), retrying in ${delay}ms`, { err: String(err).split('\n')[0] });
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new AppError(`${label} failed after ${attempts} attempts`, 'RETRY_EXHAUSTED', lastErr);
+}
+
+// =============================================================================
+// Storage
+// =============================================================================
+
+class Storage {
+  constructor(public readonly base: string, private logger: Logger) {
+    ['clips', 'audio', 'segments', 'videos'].forEach(d => this.ensureDir(d));
+  }
+  path(...parts: string[]) { return path.join(this.base, ...parts); }
+  ensureDir(rel: string)   { fs.mkdirSync(this.path(rel), { recursive: true }); }
+  exists(rel: string)      { return fs.existsSync(this.path(rel)); }
+  size(rel: string)        { try { return fs.statSync(this.path(rel)).size; } catch { return 0; } }
+  rm(rel: string)          { const p = this.path(rel); if (fs.existsSync(p)) fs.unlinkSync(p); }
+  clearDir(rel: string) {
+    const dir = this.path(rel);
+    if (!fs.existsSync(dir)) return;
+    for (const f of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, f));
+  }
+  checkDiskSpace(requiredGB: number) {
+    try {
+      const s = fs.statfsSync(this.base);
+      const freeGB = (s.bavail * s.bsize) / 1024 / 1024 / 1024;
+      if (freeGB < requiredGB) throw new AppError(`Only ${freeGB.toFixed(2)}GB free, need ${requiredGB}GB`, 'NO_DISK_SPACE');
+      this.logger.debug(`Disk space OK: ${freeGB.toFixed(2)}GB free`);
+    } catch (e: any) {
+      if (e.code === 'NO_DISK_SPACE') throw e;
+      this.logger.warn(`Could not check disk space: ${e.message}`);
+    }
+  }
+}
+
+// =============================================================================
+// Ffmpeg
+// =============================================================================
+
+class Ffmpeg {
+  constructor(private cfg: Config, private logger: Logger) {}
+  private get videoSize() { return `${this.cfg.videoW}x${this.cfg.videoH}`; }
+  private get videoRes()  { return `${this.cfg.videoW}:${this.cfg.videoH}`; }
+
+  private async run(cmd: string, label: string): Promise<{ stdout: string; stderr: string }> {
+    this.logger.debug(`ffmpeg: ${label}`, { cmd: cmd.slice(0, 240) });
+    if (this.cfg.dryRun) {
+      this.logger.info(`[DRY RUN] ffmpeg ${label}`);
+      return { stdout: '', stderr: '' };
+    }
+    try {
+      return await execAsync(cmd, { timeout: this.cfg.execTimeoutMs, maxBuffer: 50 * 1024 * 1024 });
+    } catch (err: any) {
+      const tail = (err.stderr ?? '').split('\n').slice(-15).join('\n');
+      throw new AppError(`ffmpeg ${label} failed: ${err.message?.split('\n')[0]}`, 'FFMPEG_FAILED', tail);
+    }
+  }
+
+  async silence(outputPath: string, durationSec: number) {
+    return this.run(
+      `ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo ` +
+      `-t ${durationSec} -acodec libmp3lame -b:a ${this.cfg.audioBitrate} ` +
+      `${shellQuote(outputPath)}`,
+      'silence',
+    );
+  }
+
+  async assembleSegment(clipPath: string, introAudioPath: string, outputPath: string) {
+    const { videoSize, videoRes, videoFps, introDuration, segmentDuration } = this.cfg;
+    const filter =
+      `[0:v]setpts=PTS-STARTPTS,fps=${videoFps}[v0];` +
+      `[1:a]aresample=44100,asetpts=PTS-STARTPTS[a0];` +
+      `[2:v]trim=0:${segmentDuration},setpts=PTS-STARTPTS,` +
+        `scale=${videoSize}:force_original_aspect_ratio=decrease,` +
+        `pad=${videoRes}:(ow-iw)/2:(oh-ih)/2[v1];` +   // ← pad uses : not x
+      `[2:a]aresample=44100,atrim=0:${segmentDuration},asetpts=PTS-STARTPTS[a1];` +
+      `[v0][v1]concat=n=2:v=1:a=0[vout];` +
+      `[a0][a1]concat=n=2:v=0:a=1[aout]`;
+
+    return this.run(
+      `ffmpeg -y ` +
+      `-f lavfi -i "color=c=black:s=${videoSize}:r=${videoFps}:d=${introDuration}" ` +
+      `-i ${shellQuote(introAudioPath)} ` +
+      `-i ${shellQuote(clipPath)} ` +
+      `-filter_complex ${shellQuote(filter)} ` +
+      `-map "[vout]" -map "[aout]" ` +
+      `-c:v libx264 -preset ${this.cfg.ffmpegPreset} -crf ${this.cfg.ffmpegCrf} -pix_fmt yuv420p ` +
+      `-c:a aac -b:a ${this.cfg.audioBitrate} -ar 44100 -ac 2 -async 1 ` +
+      `-shortest -movflags +faststart ` +
+      `${shellQuote(outputPath)}`,
+      'assembleSegment',
+    );
+  }
+
+  async concat(segments: string[], outputPath: string) {
+    const listPath = path.join(this.cfg.outputDir, '.segments.txt');
+    const content = segments.map(p => `file '${p.replace(/'/g, `'\\''`)}'`).join('\n');
+    fs.writeFileSync(listPath, content);
+    try {
+      return await this.run(
+        `ffmpeg -y -f concat -safe 0 -i ${shellQuote(listPath)} ` +
+        `-c:v libx264 -preset ${this.cfg.ffmpegPreset} -crf ${this.cfg.ffmpegCrf} ` +
+        `-c:a aac -b:a ${this.cfg.audioBitrate} ` +
+        `-movflags +faststart ${shellQuote(outputPath)}`,
+        'concat',
+      );
+    } finally {
+      if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
+    }
+  }
+
+  async probeDuration(filePath: string): Promise<number> {
+    if (this.cfg.dryRun) return this.cfg.introDuration + this.cfg.segmentDuration;
+    try {
+      const { stdout } = await this.run(
+        `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ${shellQuote(filePath)}`,
+        'probeDuration',
+      );
+      const d = parseFloat(stdout);
+      return Number.isFinite(d) && d > 0 ? d : 0;
+    } catch { return 0; }
+  }
+}
+
+// =============================================================================
+// Fetcher
+// =============================================================================
+
+class Fetcher {
+  constructor(private cfg: Config, private logger: Logger) {}
+
+  async getTrendingClips(): Promise<NewsClip[]> {
+    const seen = new Set<string>();
+    const clips: NewsClip[] = [];
+    for (const source of NEWS_SOURCES) {
+      this.logger.info(`Fetching from ${source.name}`);
+      try {
+        const { stdout } = await retry(
+          () => execAsync(
+            `yt-dlp --flat-playlist --dump-json --playlist-end 5 ${shellQuote(source.url)} 2>/dev/null`,
+            { timeout: this.cfg.execTimeoutMs, maxBuffer: 50 * 1024 * 1024 },
+          ),
+          this.cfg.retryAttempts, this.cfg.retryBaseDelayMs, `yt-dlp ${source.name}`, this.logger,
+        );
+        for (const line of stdout.trim().split('\n').filter(Boolean)) {
+          try {
+            const v = JSON.parse(line);
+            if (!v?.id || seen.has(v.id)) continue;
+            seen.add(v.id);
+            clips.push({
+              id: v.id,
+              title: String(v.title ?? 'Untitled'),
+              source: source.name,
+              url: `https://youtube.com/watch?v=${v.id}`,
+              downloadedPath: '',
+            });
+          } catch { /* skip malformed */ }
+        }
+      } catch (err) {
+        this.logger.error(`Failed to fetch ${source.name}`, { err: String(err).split('\n')[0] });
+      }
+    }
+    return clips.slice(0, this.cfg.maxClips);
+  }
+
+  async downloadClip(clip: NewsClip): Promise<void> {
+    const outputPath = path.join(this.cfg.outputDir, 'clips', `${clip.id}.mp4`);
+    if (this.cfg.dryRun) {
+      this.logger.info(`[DRY RUN] Would download: ${clip.title.slice(0, 50)}`);
+      clip.downloadedPath = outputPath;
+      return;
+    }
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 1024) {
+      this.logger.debug(`Clip cached, skipping: ${clip.id}`);
+      clip.downloadedPath = outputPath;
+      return;
+    }
+    this.logger.info(`Downloading: ${clip.title.slice(0, 50)}`, { id: clip.id });
+    const start = Date.now();
+    await retry(
+      () => execAsync(
+        `yt-dlp -f "best[height<=480][ext=mp4]/best[height<=480]/best" ` +
+        `-o ${shellQuote(outputPath)} ${shellQuote(clip.url)} 2>&1 | tail -3`,
+        { timeout: this.cfg.execTimeoutMs, maxBuffer: 50 * 1024 * 1024 },
+      ),
+      this.cfg.retryAttempts, this.cfg.retryBaseDelayMs, `download ${clip.id}`, this.logger,
+    );
+    const sizeMB = (fs.statSync(outputPath).size / 1024 / 1024).toFixed(1);
+    this.logger.info(`Downloaded ${clip.id}`, { sizeMB, tookMs: Date.now() - start });
+    clip.downloadedPath = outputPath;
+  }
+
+  async downloadAll(clips: NewsClip[]): Promise<NewsClip[]> {
+    const queue = [...clips];
+    const results: NewsClip[] = [];
+    const workers = Array.from({ length: this.cfg.downloadConcurrency }, async () => {
+      while (queue.length > 0) {
+        const clip = queue.shift();
+        if (!clip) break;
+        try { await this.downloadClip(clip); results.push(clip); }
+        catch (err) { this.logger.error(`Download permanently failed: ${clip.title.slice(0, 50)}`); }
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+}
+
+// =============================================================================
+// TTS
+// =============================================================================
+
+class TtsService {
+  constructor(private cfg: Config, private logger: Logger, private ffmpeg: Ffmpeg) {}
+
+  private sanitize(text: string) {
+    return text.replace(/[<>&"']/g, '').slice(0, 200);
+  }
+
+  async generate(text: string, outputPath: string): Promise<void> {
+    if (this.cfg.dryRun) {
+      this.logger.info(`[DRY RUN] TTS would generate: ${text.slice(0, 60)}...`);
+      return;
+    }
+    const t = this.sanitize(text);
+
+    if (this.cfg.azureKey) {
+      try { await this.azure(t, outputPath); this.logger.info('TTS via Azure', { voice: this.cfg.azureVoice }); return; }
+      catch (err) { this.logger.warn('Azure TTS failed, trying edge-tts', { err: String(err).split('\n')[0] }); }
+    }
+    try { await this.edgeTts(t, outputPath); this.logger.info('TTS via edge-tts', { voice: this.cfg.edgeTtsVoice }); return; }
+    catch (err) { this.logger.warn('edge-tts failed, falling back to silence', { err: String(err).split('\n')[0] }); }
+
+    await this.ffmpeg.silence(outputPath, this.cfg.introDuration);
+    this.logger.warn('TTS using silence (last resort)');
+  }
+
+  private async azure(text: string, outputPath: string) {
+    const ssml = `<speak version='1.0' xml:lang='en-US'><voice name='${this.cfg.azureVoice}'>${text}</voice></speak>`;
+    const r = await axios({
+      method: 'post',
+      url: `https://${this.cfg.azureRegion}.tts.speech.microsoft.com/cognitiveservices/v1`,
+      data: ssml,
+      headers: {
+        'Ocp-Apim-Subscription-Key': this.cfg.azureKey!,
+        'Content-Type': 'application/ssml+xml',
+        'X-Microsoft-OutputFormat': 'audio-16khz-128kbitrate-mono-mp3',
+      },
+      responseType: 'stream',
+      validateStatus: () => true,
+      timeout: 30_000,
+    });
+    if (r.status < 200 || r.status >= 300) throw new AppError(`Azure ${r.status}`, 'AZURE_TTS_FAILED');
+    const w = fs.createWriteStream(outputPath);
+    r.data.pipe(w);
+    await new Promise<void>((res, rej) => { w.on('finish', () => res()); w.on('error', rej); });
+    if (fs.statSync(outputPath).size < 100) throw new AppError('Azure returned empty audio', 'AZURE_TTS_EMPTY');
+  }
+
+  private async edgeTts(text: string, outputPath: string) {
+    await execAsync(
+      `edge-tts --text ${shellQuote(text)} ` +
+      `--write-media ${shellQuote(outputPath)} --voice ${shellQuote(this.cfg.edgeTtsVoice)}`,
+      { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
+    );
+    if (fs.statSync(outputPath).size < 100) throw new AppError('edge-tts produced empty file', 'EDGE_TTS_EMPTY');
+  }
+}
+
+// =============================================================================
+// Pipeline
+// =============================================================================
+
+class Pipeline {
+  constructor(
+    private cfg: Config,
+    private logger: Logger,
+    private storage: Storage,
+    private ffmpeg: Ffmpeg,
+    private fetcher: Fetcher,
+    private tts: TtsService,
+  ) {}
+
+  async run(): Promise<string> {
+    const t0 = Date.now();
+    this.logger.info('🎬 Pipeline started', { maxClips: this.cfg.maxClips, segmentDuration: this.cfg.segmentDuration });
+
+    this.storage.checkDiskSpace(this.cfg.minDiskSpaceGB);
+
+    if (this.cfg.cleanupBefore) {
+      this.logger.info('Cleaning previous outputs');
+      ['clips', 'audio', 'segments', 'videos'].forEach(d => this.storage.clearDir(d));
+    }
+
+    const clips = await this.fetcher.getTrendingClips();
+    this.logger.info(`Found ${clips.length} unique clips`);
+    if (clips.length === 0) throw new AppError('No clips fetched', 'NO_CLIPS');
+
+    this.logger.info('Downloading clips in parallel');
+    const downloaded = await this.fetcher.downloadAll(clips);
+    this.logger.info(`Downloaded ${downloaded.length}/${clips.length} clips`);
+    if (downloaded.length === 0) throw new AppError('No clips downloaded', 'NO_DOWNLOADS');
+
+    const segments: string[] = [];
+    for (let i = 0; i < downloaded.length; i++) {
+      const clip = downloaded[i];
+      const n = i + 1;
+      this.logger.info(`Building segment ${n}/${downloaded.length}`, { title: clip.title.slice(0, 50) });
+      const segStart = Date.now();
+
+      const introPath   = this.storage.path('audio', `${clip.id}_intro.mp3`);
+      const segmentPath = this.storage.path('segments', `${clip.id}_segment.mp4`);
+      const introText = `Coming up next on Breaking News AI. ${clip.title.slice(0, 80)}. From ${clip.source}. Let's watch.`;
+
+      await this.tts.generate(introText, introPath);
+      await this.ffmpeg.assembleSegment(clip.downloadedPath, introPath, segmentPath);
+
+      const dur = await this.ffmpeg.probeDuration(segmentPath);
+      if (!this.cfg.dryRun && dur < 1) throw new AppError(`Segment ${n} has invalid duration`, 'SEGMENT_INVALID');
+      this.logger.info(`Segment ${n} ready`, {
+        durationSec: dur.toFixed(1),
+        tookMs: Date.now() - segStart,
+      });
+      segments.push(segmentPath);
+    }
+
+    this.logger.info('Compiling final video');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const finalPath = this.storage.path('videos', `breaking-news-${ts}.mp4`);
+    await this.ffmpeg.concat(segments, finalPath);
+
+    const sizeMB = (fs.statSync(finalPath).size / 1024 / 1024).toFixed(2);
+    const totalMin = (downloaded.length * (this.cfg.segmentDuration + this.cfg.introDuration)) / 60;
+    this.logger.info('🎉 Compilation complete', {
+      path: finalPath,
+      sizeMB,
+      segments: downloaded.length,
+      durationMin: totalMin.toFixed(1),
+      totalMs: Date.now() - t0,
+    });
+    return finalPath;
+  }
+}
+
+// =============================================================================
+// Shutdown & Entry
+// =============================================================================
+
+let shuttingDown = false;
+function installShutdown(logger: Logger) {
+  const h = (sig: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.warn(`Received ${sig}, aborting`);
+    process.exit(130);
+  };
+  process.on('SIGINT',  () => h('SIGINT'));
+  process.on('SIGTERM', () => h('SIGTERM'));
+}
+
+async function main() {
+  const cfg = loadConfig();
+  const logger = new Logger(cfg.logLevel);
+  installShutdown(logger);
+
+  const storage  = new Storage(cfg.outputDir, logger);
+  const ffmpeg   = new Ffmpeg(cfg, logger);
+  const fetcher  = new Fetcher(cfg, logger);
+  const tts      = new TtsService(cfg, logger, ffmpeg);
+  const pipeline = new Pipeline(cfg, logger, storage, ffmpeg, fetcher, tts);
+
+  try {
+    const out = await pipeline.run();
+    console.log(`\n📤 Ready to upload to YouTube: ${out}\n`);
+    process.exit(0);
+  } catch (err: any) {
+    logger.error('Pipeline failed', { err: err.message, code: err.code });
+    if (err.code === 'FFMPEG_FAILED' && err.cause) console.error('--- ffmpeg tail ---\n' + err.cause);
+    process.exit(1);
+  }
+}
+
+main();

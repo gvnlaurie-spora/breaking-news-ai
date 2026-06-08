@@ -21,18 +21,13 @@
     "build-news": "tsx src/scripts/build-news-show.ts",
     "build-news:dry": "DRY_RUN=1 tsx src/scripts/build-news-show.ts",
     "build-news:debug": "LOG_LEVEL=debug tsx src/scripts/build-news-show.ts",
-    "build-news:clean": "CLEANUP_BEFORE=1 tsx src/scripts/build-news-show.ts",
-    "show:morning": "tsx src/scripts/build-news-show.ts --show=morning",
-    "show:noon": "tsx src/scripts/build-news-show.ts --show=noon",
-    "show:evening": "tsx src/scripts/build-news-show.ts --show=evening",
-    "show:night": "tsx src/scripts/build-news-show.ts --show=night"
+    "build-news:clean": "CLEANUP_BEFORE=1 tsx src/scripts/build-news-show.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "Breaking News AI — 30-minute compiled news video pipeline",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1063.0",
     "@fastify/cors": "^8.5.0",
     "@fastify/helmet": "^11.0.0",
     "@fastify/multipart": "^10.0.0",
