@@ -1,97 +1,76 @@
-import "dotenv/config";
-import fastify from 'fastify';
-import fastifyCors from '@fastify/cors';
-import fastifyHelmet from '@fastify/helmet';
-import { exec } from 'child_process';
+import Fastify from 'fastify';
+import path from 'path';
+import { spawn } from 'child_process';
 
-// Create Fastify instance
-const server = fastify({ logger: true });
+const server = Fastify({ logger: true });
 
-// Register plugins
-server.register(fastifyCors, { origin: true });
-server.register(fastifyHelmet);
+// ── Show detection ────────────────────────────────────────────────────────────
+function getShowFromUTCHour(hour: number): string {
+  if (hour >= 4 && hour < 8) return 'morning';
+  if (hour >= 8 && hour < 14) return 'noon';
+  if (hour >= 14 && hour < 20) return 'evening';
+  return 'night';
+}
 
-// Health check endpoints
-server.get('/health', async () => ({
-  status: 'ok',
-  timestamp: new Date().toISOString()
-}));
+// ── Health check endpoint ─────────────────────────────────────────────────────
+server.get('/health', async () => {
+  return { 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  };
+});
 
-server.get('/api/health', async () => ({
-  status: 'ok',
-  timestamp: new Date().toISOString()
-}));
-
-// PIPELINE TRIGGER ENDPOINT - This is what we need!
+// ── PIPELINE TRIGGER — cron-job.org hits this ─────────────────────────────────
 server.get('/api/run-pipeline', async (request, reply) => {
   const secretKey = request.headers['x-cron-secret'];
   const expectedSecret = process.env.CRON_SECRET || 'breaking-news-secret';
-  
-  console.log('🔐 Pipeline trigger attempt, secret present:', !!secretKey);
   
   if (secretKey !== expectedSecret) {
     console.log('❌ Unauthorized pipeline trigger attempt');
     return reply.code(401).send({ error: 'Unauthorized' });
   }
   
-  console.log('🚀 Pipeline triggered via cron job at:', new Date().toISOString());
+  const hour = new Date().getUTCHours();
+  const show = getShowFromUTCHour(hour);
+  console.log(`🚀 Pipeline triggered — UTC hour ${hour} → show: ${show}`);
   
-  // Run the full pipeline in the background
-  exec('npm run full-run', { 
-    cwd: '/opt/render/project/src/backend',
-    env: process.env 
-  }, (error, stdout, stderr) => {
-    if (error) {
-      console.error('❌ Pipeline failed:', error.message);
-      console.error('stderr:', stderr);
-    } else {
-      console.log('✅ Pipeline completed successfully');
-      console.log('stdout:', stdout);
+  const child = spawn(
+    'npx',
+    ['ts-node', 'src/scripts/build-news-show.ts', `--show=${show}`],
+    {
+      cwd: '/opt/render/project/src/backend',
+      env: process.env,
+      detached: true,
+      stdio: 'ignore',
+      shell: '/bin/bash',
     }
-  });
+  );
   
-  return { 
-    status: 'started', 
-    message: 'Full pipeline is running in the background',
-    timestamp: new Date().toISOString()
+  child.unref();
+  
+  return {
+    status: 'started',
+    show,
+    utcHour: hour,
+    pid: child.pid,
+    message: `Show "${show}" is running in the background`,
+    timestamp: new Date().toISOString(),
   };
 });
 
-// Pipeline health check
-server.get('/api/pipeline-health', async () => {
-  return { 
-    status: 'ready', 
-    message: 'Pipeline trigger is available',
-    timestamp: new Date().toISOString()
-  };
-});
-
-// Root endpoint
-server.get('/', async () => ({
-  name: 'Breaking News AI API',
-  version: '1.0.0',
-  status: 'running',
-  endpoints: {
-    health: '/health',
-    apiHealth: '/api/health',
-    pipeline: '/api/run-pipeline',
-    pipelineHealth: '/api/pipeline-health'
-  }
-}));
-
-const port = process.env.PORT ? parseInt(process.env.PORT) : 4000;
-
+// ── Start server ──────────────────────────────────────────────────────────────
 const start = async () => {
   try {
-    await server.listen({ port, host: "0.0.0.0" });
-    console.log(`✅ Server running on http://localhost:${port}`);
-    console.log(`📝 Pipeline trigger available at: /api/run-pipeline`);
+    const port = parseInt(process.env.PORT || '4000', 10);
+    await server.listen({ port: port, host: '0.0.0.0' });
+    console.log(`✅ Server running on port ${port}`);
+    console.log(`📋 Health check: http://localhost:${port}/health`);
+    console.log(`🎬 Pipeline trigger: http://localhost:${port}/api/run-pipeline`);
   } catch (err) {
-    console.error("❌ Server failed to start:", err);
+    server.log.error(err);
     process.exit(1);
   }
 };
 
 start();
-
-export default server;
