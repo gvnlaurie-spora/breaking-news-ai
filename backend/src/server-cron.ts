@@ -172,7 +172,7 @@ app.use((req, res) => {
   res.status(404).json({ error: 'not found', path: req.path });
 });
  
-app.listen(PORT, '0.0.0.0', () => { => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[server] Cron trigger listening on :${PORT}`);
   console.log(`[server] Endpoints:`);
   for (const s of SHOWS) {
