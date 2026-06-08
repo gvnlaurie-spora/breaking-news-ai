@@ -176,7 +176,7 @@ app.listen(PORT, () => {
   console.log(`[server] Cron trigger listening on :${PORT}`);
   console.log(`[server] Endpoints:`);
   for (const s of SHOWS) {
-    console.log(`  POST /api/run-pipeline/${s.id}  →  ${s.emoji} ${s.name}`);
+    console.log(`  POST /api/run-pipeline/${s.id}  →  ${s.label}`);
   }
 });
 
