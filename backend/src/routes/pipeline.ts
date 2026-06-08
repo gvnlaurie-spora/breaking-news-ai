@@ -1,49 +1,64 @@
-import { FastifyInstance } from 'fastify';
-import { exec } from 'child_process';
-import { prisma } from '../utils/prisma';
+import { Router, Request, Response } from "express";
+import { exec } from "child_process";
+import path from "path";
 
-export default async function pipelineRoutes(server: FastifyInstance) {
+const router = Router();
 
-  server.get('/run-pipeline', async (request, reply) => {
-    const secretKey = request.headers['x-cron-secret'];
-    const expectedSecret = process.env.CRON_SECRET || 'breaking-news-secret';
-    if (secretKey !== expectedSecret) {
-      return reply.code(401).send({ error: 'Unauthorized' });
-    }
-    console.log('🚀 Pipeline triggered at:', new Date().toISOString());
-    exec('npm run scrape && npm run process-articles', {
-      cwd: '/opt/render/project/src/backend',
-      env: process.env
-    }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('❌ Pipeline failed:', error.message, stderr);
-      } else {
-        console.log('✅ Pipeline completed\n', stdout);
-      }
-    });
-    return { status: 'started', timestamp: new Date().toISOString() };
-  });
-
-  server.get('/pipeline-health', async () => {
-    const articles = await prisma.article.count();
-    const ready = await prisma.script.count({ where: { status: 'ready' } });
-    const completed = await prisma.script.count({ where: { status: 'completed' } });
-    return { status: 'ready', articles, ready, completed, timestamp: new Date().toISOString() };
-  });
-
-  server.get('/scrape', async (request, reply) => {
-    const secretKey = request.headers['x-cron-secret'];
-    const expectedSecret = process.env.CRON_SECRET || 'breaking-news-secret';
-    if (secretKey !== expectedSecret) {
-      return reply.code(401).send({ error: 'Unauthorized' });
-    }
-    exec('npm run scrape', {
-      cwd: '/opt/render/project/src/backend',
-      env: process.env
-    }, (error, stdout, stderr) => {
-      if (error) console.error('❌ Scrape failed:', error.message, stderr);
-      else console.log('✅ Scrape done\n', stdout);
-    });
-    return { status: 'scraping', timestamp: new Date().toISOString() };
-  });
+// Determine which show to run based on UTC hour
+function getShowForTime(): string {
+  const hour = new Date().getUTCHours();
+  
+  if (hour >= 0 && hour < 4) return 'night';
+  if (hour >= 4 && hour < 8) return 'morning';
+  if (hour >= 8 && hour < 14) return 'noon';
+  if (hour >= 14 && hour < 20) return 'evening';
+  return 'night';
 }
+
+// Health check endpoint (no auth required)
+router.get("/api/pipeline-health", (req: Request, res: Response) => {
+  res.json({ 
+    status: "ok", 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// Trigger pipeline endpoint
+router.get("/api/pipeline/trigger", (req: Request, res: Response) => {
+  const { secret } = req.query;
+  const cronSecret = process.env.CRON_SECRET;
+  
+  // Validate secret
+  if (!cronSecret || secret !== cronSecret) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const show = getShowForTime();
+  const scriptPath = path.join(__dirname, "..", "scripts", "build-news-show.ts");
+  const backendDir = path.join(__dirname, "..", "..");
+  
+  // Run pipeline in background
+  exec(`npx ts-node ${scriptPath} --show=${show}`, {
+    cwd: backendDir,
+    env: { ...process.env }
+  }, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Pipeline error for ${show}:`, error);
+      console.error("Stderr:", stderr);
+    } else {
+      console.log(`Pipeline ${show} completed:`, stdout);
+    }
+  });
+  
+  // Return immediately
+  res.json({ 
+    status: "accepted", 
+    show, 
+    utcHour: new Date().getUTCHours(),
+    timestamp: new Date().toISOString(),
+    message: `Pipeline for ${show} show started in background`
+  });
+});
+
+export default router;
