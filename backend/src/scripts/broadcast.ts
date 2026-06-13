@@ -16,6 +16,8 @@
  * Run: npx tsx src/scripts/broadcast.ts
  */
 
+import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
+process.env.PATH = `${require('path').dirname(ffmpegInstaller.path)}:${process.env.PATH}`;
 import "dotenv/config";
 import axios from "axios";
 import { execSync, execFileSync } from "child_process";
