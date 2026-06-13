@@ -27,7 +27,8 @@
     "show:evening": "tsx src/scripts/build-news-show.ts --show=evening",
     "show:night": "tsx src/scripts/build-news-show.ts --show=night",
     "start:dev": "tsx src/server-cron.ts",
-    "build-news-runner": "tsx src/scripts/build-news-runner.ts"
+    "build-news-runner": "tsx src/scripts/build-news-runner.ts",
+    "broadcast": "tsx src/scripts/broadcast.ts"
   },
   "keywords": [],
   "author": "",
@@ -42,10 +43,10 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@mistralai/mistralai": "^1.0.0",
     "@prisma/client": "^5.22.0",
-    "axios": "^1.16.1",
+    "axios": "^1.17.0",
     "bullmq": "^5.1.0",
     "canvas": "^3.2.3",
-    "dotenv": "^16.3.1",
+    "dotenv": "^16.6.1",
     "express": "^5.2.1",
     "fastify": "^5.8.5",
     "fluent-ffmpeg": "^2.1.3",
@@ -58,7 +59,8 @@
     "prisma": "^5.7.0",
     "rss-parser": "^3.12.0",
     "sqlite3": "^6.0.1",
-    "tsx": "^4.22.4"
+    "tsx": "^4.22.4",
+    "xml2js": "^0.6.2"
   },
   "engines": {
     "node": ">=20.0.0 <22.0.0"
