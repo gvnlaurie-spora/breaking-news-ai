@@ -44,7 +44,7 @@ const CFG = {
   W: 1920, H: 1080,
   fps: 25,
   preset: "ultrafast",
-  crf: 32,
+  crf: 35,
   audioBitrate: "128k",
   sampleRate: 44100,
   ffmpegTimeoutMs: 600_000,
